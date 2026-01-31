@@ -1,6 +1,8 @@
 "use strict";
 const mongoose = require("mongoose");
 
+const DOCUMENT_NAME = "User";
+const COLLECTION_NAME = "Users";
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -42,7 +44,7 @@ const userSchema = new mongoose.Schema(
       default: "customer",
     },
   },
-  { timestamps: true },
+  { timestamps: true, collection: COLLECTION_NAME },
 );
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model(DOCUMENT_NAME, userSchema);

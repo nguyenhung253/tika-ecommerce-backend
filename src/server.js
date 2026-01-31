@@ -2,7 +2,7 @@ const app = require("./app");
 const dotenv = require("dotenv");
 const { checkOverload } = require("./helpers/check.connect");
 dotenv.config();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8386;
 
 require("./configs/init.mongodb");
 checkOverload();
