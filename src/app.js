@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 require("./configs/init.mongodb");
 
 // Routes
-app.use("/api/v1/auth", require("./routes/access/access.route"));
+app.use("/api/v1", require("./routes"));
 
 // Error handling
 

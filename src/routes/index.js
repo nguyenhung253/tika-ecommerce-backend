@@ -5,10 +5,10 @@ const router = express.Router();
 
 // Check API key cho tất cả routes
 router.use(apiKey);
-router.use(permission("0000"));
+router.use(permission("read"));
 
 // Mount sub-routes
-router.use("/auth", require("./access/access.route"));
-router.use("/user", require("./user/user.route"));
+router.use("/auth", require("./access"));
 
+router.use("/product", require("./product"));
 module.exports = router;

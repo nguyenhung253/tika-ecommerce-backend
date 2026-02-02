@@ -5,11 +5,12 @@ const {
   BadRequestError,
   ConflictRequestError,
 } = require("../helpers/error.response");
-const { OK, CREATED } = require("../helpers/success.response");
 const {
   generateAccessToken,
   generateRefreshToken,
 } = require("../utils/authToken");
+const TokenService = require("./token.service");
+const { parseTokenExpiry } = require("../utils/tokenExpiry");
 const VALID_ROLES = ["shop", "customer", "admin"];
 
 class AccessService {
@@ -46,21 +47,28 @@ class AccessService {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    return new CREATED({
-      message: "User registered successfully",
-      data: {
-        user: {
-          id: newUser._id,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-        },
-        tokens: {
-          accessToken,
-          refreshToken,
-        },
-      },
+    // Save refresh token to database
+    const refreshTokenExpire = process.env.REFRESH_TOKEN_EXPIRE || "7d";
+    const expiresAt = parseTokenExpiry(refreshTokenExpire);
+
+    await TokenService.saveRefreshToken({
+      userId: newUser._id,
+      refreshToken,
+      expiresAt,
     });
+
+    return {
+      user: {
+        id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+    };
   };
 
   static login = async ({ email, password }) => {
@@ -86,21 +94,85 @@ class AccessService {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    return new OK({
-      message: "Login successful",
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        tokens: {
-          accessToken,
-          refreshToken,
-        },
-      },
+    // Save refresh token to database
+    const refreshTokenExpire = process.env.REFRESH_TOKEN_EXPIRE || "7d";
+    const expiresAt = parseTokenExpiry(refreshTokenExpire);
+
+    await TokenService.saveRefreshToken({
+      userId: user._id,
+      refreshToken,
+      expiresAt,
     });
+
+    return {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+    };
+  };
+
+  // Logout - blacklist current token
+  static logout = async ({ refreshToken }) => {
+    if (!refreshToken) {
+      throw new BadRequestError("Refresh token is required");
+    }
+
+    await TokenService.blacklistToken(refreshToken);
+
+    return { message: "Logout successful" };
+  };
+
+  // Logout all devices - blacklist all user tokens
+  static logoutAll = async ({ userId }) => {
+    await TokenService.blacklistAllUserTokens(userId);
+
+    return { message: "Logged out from all devices" };
+  };
+
+  // Refresh access token
+  static refreshToken = async ({ userId, oldRefreshToken }) => {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new BadRequestError("User not found");
+    }
+
+    // Blacklist old refresh token
+    await TokenService.blacklistToken(oldRefreshToken);
+
+    // Create new token payload
+    const payload = {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+    };
+
+    // Generate new tokens
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+
+    // Save new refresh token
+    const refreshTokenExpire = process.env.REFRESH_TOKEN_EXPIRE || "7d";
+    const expiresAt = parseTokenExpiry(refreshTokenExpire);
+
+    await TokenService.saveRefreshToken({
+      userId: user._id,
+      refreshToken,
+      expiresAt,
+    });
+
+    return {
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+    };
   };
 }
 

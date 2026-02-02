@@ -19,7 +19,7 @@ const apiKeySchema = new mongoose.Schema(
     permission: {
       type: [String],
       required: true,
-      enum: ["0000", "1111", "2222"],
+      enum: ["read", "write", "delete", "admin"],
     },
   },
   { timestamps: true, collection: COLLECTION_NAME },

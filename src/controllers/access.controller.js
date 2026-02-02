@@ -2,13 +2,14 @@
 const AccessService = require("../services/access.service");
 const asyncHandler = require("../helpers/asyncHandler");
 const { BadRequestError } = require("../helpers/error.response");
+const { SuccessResponse, CREATED } = require("../helpers/success.response");
 
 class AccessController {
   static signUp = asyncHandler(async (req, res, next) => {
     const { name, email, password, role } = req.body;
 
-    if (!name || !email || !password) {
-      throw new BadRequestError("Name, email and password are required");
+    if (!email || !password) {
+      throw new BadRequestError("Email and password are required");
     }
 
     const result = await AccessService.signUp({
@@ -17,7 +18,7 @@ class AccessController {
       password,
       role,
     });
-    return result.send(res);
+    return new CREATED({ message: "Registered OK!", data: result }).send(res);
   });
 
   static login = asyncHandler(async (req, res, next) => {
@@ -28,7 +29,44 @@ class AccessController {
     }
 
     const result = await AccessService.login({ email, password });
-    return result.send(res);
+    return new SuccessResponse({
+      message: "Login successful",
+      data: result,
+    }).send(res);
+  });
+
+  static logout = asyncHandler(async (req, res, next) => {
+    const refreshToken = req.refreshToken;
+
+    const result = await AccessService.logout({ refreshToken });
+    return new SuccessResponse({
+      message: "Logout successful",
+      data: result,
+    }).send(res);
+  });
+
+  static logoutAll = asyncHandler(async (req, res, next) => {
+    const userId = req.user.id;
+
+    const result = await AccessService.logoutAll({ userId });
+    return new SuccessResponse({
+      message: "Logged out from all devices",
+      data: result,
+    }).send(res);
+  });
+
+  static refreshToken = asyncHandler(async (req, res, next) => {
+    const userId = req.user.id;
+    const oldRefreshToken = req.refreshToken;
+
+    const result = await AccessService.refreshToken({
+      userId,
+      oldRefreshToken,
+    });
+    return new SuccessResponse({
+      message: "Token refreshed successfully",
+      data: result,
+    }).send(res);
   });
 }
 
