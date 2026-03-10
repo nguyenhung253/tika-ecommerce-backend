@@ -49,7 +49,5 @@ DEPLOYMENT_GUIDE.md
 request.http
 
 # Setup scripts (already in EC2)
-setup-ec2.sh
-
 
 .kiro
