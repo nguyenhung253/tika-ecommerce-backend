@@ -51,17 +51,5 @@ request.http
 # Setup scripts (already in EC2)
 setup-ec2.sh
 
-# PM2 ecosystem (use in EC2 only)
-ecosystem.config.js
-
-# Nginx config (use in EC2 only)
-nginx.conf
-
-# Docker compose (use in EC2 only)
-docker-compose.yml
-
-# Deployment script
-deploy.sh
-
 
 .kiro
