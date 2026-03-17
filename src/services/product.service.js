@@ -14,14 +14,13 @@ const { clothing, product, electronic } = require("../models/product.model");
 const { insertInventory } = require("../models/repositories/inventory.repo");
 const {
   findAllDraftShop,
-  findAllProducts: findAllProductsRepo,
-  findAllPublishedShop: findAllPublishedShopRepo,
-  searchProductByUser: searchProductByUserRepo,
-  findProduct: findProductRepo,
-  updateProductById: updateProductByIdRepo
-} = require("../models/repositories/product.repo");
+  findAllProducts,
+  findAllPublishedShop,
+  searchProductByUser,
+  findProduct,
   updateProductById,
 } = require("../models/repositories/product.repo");
+
 class ProductFactory {
   static async createProduct(type, payload) {
     switch (type) {
@@ -40,14 +39,18 @@ class ProductFactory {
   }
 
   static async findAllProducts(query) {
-    return await findAllProductsRepo({
+    const products = await findAllProductsRepo({
       limit: +query.limit || 50,
       sort: query.sort || "ctime",
       page: +query.page || 1,
       filter: { isPublished: true },
     });
-  }
 
+    return products
+
+  
+  }
+ 
   static async findAllPublishedForShop({ product_shop, limit = 50, skip = 0 }) {
     const query = { product_shop, isPublished: true };
     return await findAllPublishedShopRepo({ query, limit, skip });
@@ -58,9 +61,9 @@ class ProductFactory {
   }
 
   static async findProduct({ product_id }) {
-    return await findProductRepo({ 
-      product_id, 
-      unSelect: ['__v', 'product_variations'] 
+    return await findProductRepo({
+      product_id,
+      unSelect: ["__v", "product_variations"],
     });
   }
 
@@ -68,7 +71,7 @@ class ProductFactory {
     return await updateProductByIdRepo({
       productId: product_id,
       bodyUpdate: { isPublished: true, isDraft: false },
-      model: product
+      model: product,
     });
   }
 
@@ -76,7 +79,7 @@ class ProductFactory {
     return await updateProductByIdRepo({
       productId: product_id,
       bodyUpdate: { isPublished: false, isDraft: true },
-      model: product
+      model: product,
     });
   }
 
