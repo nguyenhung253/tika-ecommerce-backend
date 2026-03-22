@@ -10,16 +10,24 @@ Product (Base class - Chứa logic chung)
 
 "use strict";
 const { BadRequestError } = require("../helpers/error.response");
+const { invalidateProductCache } = require("../helpers/cache");
 const { clothing, product, electronic } = require("../models/product.model");
 const { insertInventory } = require("../models/repositories/inventory.repo");
+const productRepo = require("../models/repositories/product.repo");
 const {
-  findAllDraftShop,
-  findAllProducts,
-  findAllPublishedShop,
-  searchProductByUser,
-  findProduct,
-  updateProductById,
-} = require("../models/repositories/product.repo");
+  getCache,
+  setCache,
+  DEFAULT_TTL,
+} = require("../utils/cache/cache.service");
+const CacheKeys = require("../utils/cache/cache.keys");
+
+const {
+  findAllDraftShop: findAllDraftShopRepo,
+  findAllProducts: findAllProductsRepo,
+  findAllPublishedShop: findAllPublishedShopRepo,
+  searchProductByUser: searchProductByUserRepo,
+  findProduct: findProductRepo,
+} = productRepo;
 
 class ProductFactory {
   static async createProduct(type, payload) {
@@ -34,23 +42,38 @@ class ProductFactory {
   }
 
   static async findAllDraftForShop({ product_shop, limit = 50, skip = 0 }) {
-    const query = [product_shop, (isDraft = true)];
-    return await findAllDraftShop({ query, limit, skip });
+    const query = { product_shop, isDraft: true };
+    return await findAllDraftShopRepo({ query, limit, skip });
   }
 
   static async findAllProducts(query) {
+    const page = +query.page || 1;
+    const limit = +query.limit || 50;
+    const sort = query.sort || "ctime";
+
+    const cacheKey = CacheKeys.product.list({
+      page,
+      limit,
+      sort,
+      category: query.category || "",
+      search: query.search || "",
+    });
+
+    const cachedProducts = await getCache(cacheKey);
+    if (cachedProducts) return cachedProducts;
+
     const products = await findAllProductsRepo({
-      limit: +query.limit || 50,
-      sort: query.sort || "ctime",
-      page: +query.page || 1,
+      limit,
+      sort,
+      page,
       filter: { isPublished: true },
     });
 
-    return products
+    await setCache(cacheKey, products, DEFAULT_TTL);
 
-  
+    return products;
   }
- 
+
   static async findAllPublishedForShop({ product_shop, limit = 50, skip = 0 }) {
     const query = { product_shop, isPublished: true };
     return await findAllPublishedShopRepo({ query, limit, skip });
@@ -61,38 +84,48 @@ class ProductFactory {
   }
 
   static async findProduct({ product_id }) {
-    return await findProductRepo({
+    const cacheKey = CacheKeys.product.detail(product_id);
+    const cachedProduct = await getCache(cacheKey);
+    if (cachedProduct) return cachedProduct; //Nếu thấy cache product thì return product
+
+    const foundProduct = await findProductRepo({
       product_id,
       unSelect: ["__v", "product_variations"],
     });
+    /// Không thì find database xong setCache rồi trả về product
+    if (foundProduct) {
+      await setCache(cacheKey, foundProduct, DEFAULT_TTL);
+    }
+
+    return foundProduct;
   }
 
   static async publishProductByShop({ product_shop, product_id }) {
-    return await updateProductByIdRepo({
-      productId: product_id,
-      bodyUpdate: { isPublished: true, isDraft: false },
-      model: product,
-    });
+    const result = await product.findOneAndUpdate(
+      { _id: product_id, product_shop },
+      { isPublished: true, isDraft: false },
+      { new: true },
+    );
+
+    if (result) {
+      await invalidateProductCache(product_id);
+    }
+
+    return result;
   }
 
   static async unPublishProductByShop({ product_shop, product_id }) {
-    return await updateProductByIdRepo({
-      productId: product_id,
-      bodyUpdate: { isPublished: false, isDraft: true },
-      model: product,
-    });
-  }
+    const result = await product.findOneAndUpdate(
+      { _id: product_id, product_shop },
+      { isPublished: false, isDraft: true },
+      { new: true },
+    );
 
-  async createProduct(product_id) {
-    const newProduct = await product.create({ ...this, _id: product_id });
-    if (newProduct) {
-      await insertInventory({
-        productId: newProduct._id,
-        shopId: this.product_shop,
-        stock: this.product,
-      });
+    if (result) {
+      await invalidateProductCache(product_id);
     }
-    return newProduct;
+
+    return result;
   }
 
   /**
@@ -138,8 +171,21 @@ class Product {
     this.product_quantity = product_quantity;
   }
 
-  async createProduct() {
-    return await product.create(this);
+  async createProduct(product_id) {
+    const payload = product_id ? { ...this, _id: product_id } : this;
+    const newProduct = await product.create(payload);
+
+    if (newProduct) {
+      await insertInventory({
+        productId: newProduct._id,
+        shopId: this.product_shop,
+        stock: this.product_quantity,
+      });
+
+      await invalidateProductCache(newProduct._id);
+    }
+
+    return newProduct;
   }
 
   /**
@@ -164,7 +210,7 @@ class Clothing extends Product {
     });
     if (!newClothing) throw new BadRequestError("Create new Clothing error");
 
-    const newProduct = await super.createProduct();
+    const newProduct = await super.createProduct(newClothing._id);
     if (!newProduct) throw new BadRequestError("Create new Product error");
     return newProduct;
   }
@@ -207,7 +253,7 @@ class Electronic extends Product {
     if (!newElectronic)
       throw new BadRequestError("Create new Electronic error");
     // Tạo record trong table Product
-    const newProduct = await super.createProduct();
+    const newProduct = await super.createProduct(newElectronic._id);
     if (!newProduct) throw new BadRequestError("Create new Product error");
     return newProduct;
   }

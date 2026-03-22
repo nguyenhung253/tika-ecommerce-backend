@@ -2,10 +2,7 @@
 
 const { cart } = require("../models/cart.model");
 const { product } = require("../models/product.model");
-const {
-  BadRequestError,
-  NotFoundError,
-} = require("../helpers/error.response");
+const { BadRequestError, NotFoundError } = require("../helpers/error.response");
 
 /*
     Cart Service:
@@ -105,7 +102,7 @@ class CartService {
 
     // Check if product already in cart
     const productExists = userCart.cart_products.find(
-      (p) => p.productId === product.productId
+      (p) => p.productId === product.productId,
     );
 
     if (productExists) {
@@ -157,7 +154,9 @@ class CartService {
     }
 
     // Compare product price
-    if (foundProduct.product_price !== shop_order_ids[0].item_products[0].price) {
+    if (
+      foundProduct.product_price !== shop_order_ids[0].item_products[0].price
+    ) {
       throw new BadRequestError("Product price has changed");
     }
 
@@ -172,7 +171,7 @@ class CartService {
           "cart_products.$.quantity": quantity - old_quantity,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     return updateCart;
@@ -193,7 +192,7 @@ class CartService {
             productId,
           },
         },
-      }
+      },
     );
 
     return deleteResult;
@@ -240,7 +239,7 @@ class CartService {
       {
         cart_state: state,
       },
-      { new: true }
+      { new: true },
     );
   }
 }
