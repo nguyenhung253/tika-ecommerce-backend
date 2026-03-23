@@ -4,6 +4,8 @@ const app = express();
 const morgan = require("morgan");
 const helmet = require("helmet");
 const compression = require("compression");
+const swaggerUi = require("swagger-ui-express");
+const openapiSpec = require("./docs/swagger/openapi");
 
 // CORS configuration
 // app.use(
@@ -41,6 +43,20 @@ app.use(express.urlencoded({ extended: true }));
 // Database connection
 require("./configs/init.mongodb");
 
+// API documentation
+app.get("/api-docs.json", (req, res) => {
+  res.status(200).json(openapiSpec);
+});
+
+app.use(
+  "/api-docs",
+  swaggerUi.serve,
+  swaggerUi.setup(openapiSpec, {
+    explorer: true,
+    customSiteTitle: "Ecommerce Backend API Docs",
+  }),
+);
+
 // Routes
 app.use("/api/v1", require("./routes"));
 
@@ -58,6 +74,7 @@ app.use((err, req, res, next) => {
   const statusCode = err.status || 500;
   res.status(statusCode).json({
     code: statusCode,
+    errorCode: err.errorCode || "INTERNAL_SERVER_ERROR",
     message: err.message || "Internal Server Error",
   });
 });

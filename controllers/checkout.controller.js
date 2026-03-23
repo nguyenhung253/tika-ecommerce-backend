@@ -27,6 +27,7 @@ class CheckoutController {
       data: await CheckoutService.orderByUser({
         ...req.body,
         userId: req.user.id,
+        idempotencyKey: req.headers["x-idempotency-key"],
       }),
     }).send(res);
   });
@@ -78,6 +79,7 @@ class CheckoutController {
       message: "Update order status success",
       data: await CheckoutService.updateOrderStatusByShop({
         orderId: req.params.orderId,
+        shopId: req.user.id,
         status: req.body.status,
       }),
     }).send(res);

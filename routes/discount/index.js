@@ -16,9 +16,17 @@ router.get(
 router.use(authentication);
 
 // User routes
-router.post("/amount", asyncHandler(DiscountController.getDiscountAmount));
+router.post(
+  "/amount",
+  requireRole("customer", "admin"),
+  asyncHandler(DiscountController.getDiscountAmount),
+);
 
-router.post("/cancel", asyncHandler(DiscountController.cancelDiscountCode));
+router.post(
+  "/cancel",
+  requireRole("customer", "admin"),
+  asyncHandler(DiscountController.cancelDiscountCode),
+);
 
 // Shop only routes
 router.post(

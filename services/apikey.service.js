@@ -8,7 +8,6 @@ const findById = async (key) => {
   return objKey;
 };
 
-// Tạo API key mới (dùng khi cần tạo key cho client)
 const createApiKey = async (permissions = ["read"]) => {
   const newKey = await apikeyModel.create({
     key: crypto.randomBytes(64).toString("hex"),

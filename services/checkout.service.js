@@ -1,12 +1,48 @@
 "use strict";
 
-const { BadRequestError, NotFoundError } = require("../helpers/error.response");
+const {
+  BadRequestError,
+  ForbiddenRequestError,
+  NotFoundError,
+} = require("../helpers/error.response");
 const { findCartById } = require("../models/repositories/cart.repo");
 const { checkProductByServer } = require("../models/repositories/product.repo");
 const DiscountService = require("./discount.service");
 const { order } = require("../models/order.model");
 const { cart } = require("../models/cart.model");
 const { inventory } = require("../models/inventory.model");
+const {
+  getCache,
+  setCache,
+  deleteCache,
+} = require("../utils/cache/cache.service");
+const CacheKeys = require("../utils/cache/cache.keys");
+const { logAuditEvent } = require("../helpers/audit.helper");
+
+const IDEMPOTENCY_RESULT_TTL_SECONDS = 600;
+const IDEMPOTENCY_LOCK_TTL_SECONDS = 30;
+
+const ORDER_TRANSITIONS = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
+
+const CHECKOUT_ERROR_CODES = {
+  IDEMPOTENCY_KEY_TOO_LONG: "CHECKOUT_IDEMPOTENCY_KEY_TOO_LONG",
+  IDEMPOTENCY_IN_PROGRESS: "CHECKOUT_IDEMPOTENCY_IN_PROGRESS",
+  CART_NOT_FOUND: "CHECKOUT_CART_NOT_FOUND",
+  ORDER_INVALID_ITEMS: "CHECKOUT_INVALID_ITEMS",
+  INVENTORY_INSUFFICIENT: "CHECKOUT_INVENTORY_INSUFFICIENT",
+  ORDER_NOT_FOUND: "CHECKOUT_ORDER_NOT_FOUND",
+  ORDER_CANCEL_INVALID_STATUS: "CHECKOUT_CANCEL_INVALID_STATUS",
+  STATUS_INVALID: "CHECKOUT_STATUS_INVALID",
+  STATUS_TRANSITION_INVALID: "CHECKOUT_STATUS_TRANSITION_INVALID",
+  SHOP_ORDER_FORBIDDEN: "CHECKOUT_SHOP_ORDER_FORBIDDEN",
+  SHOP_CANCEL_FORBIDDEN: "CHECKOUT_SHOP_CANCEL_FORBIDDEN",
+};
 
 /**
  * Checkout Service
@@ -15,6 +51,85 @@ const { inventory } = require("../models/inventory.model");
  */
 
 class CheckoutService {
+  static normalizeIdempotencyKey(idempotencyKey) {
+    if (!idempotencyKey) {
+      return "";
+    }
+
+    const normalizedKey = String(idempotencyKey).trim();
+    if (!normalizedKey) {
+      return "";
+    }
+
+    if (normalizedKey.length > 128) {
+      throw new BadRequestError(
+        "Idempotency key is too long",
+        undefined,
+        CHECKOUT_ERROR_CODES.IDEMPOTENCY_KEY_TOO_LONG,
+      );
+    }
+
+    return normalizedKey;
+  }
+
+  static async handleIdempotencyResult({ userId, idempotencyKey }) {
+    const resultKey = CacheKeys.order.idempotencyResult(userId, idempotencyKey);
+    const lockKey = CacheKeys.order.idempotencyLock(userId, idempotencyKey);
+
+    const cachedOrder = await getCache(resultKey);
+    if (cachedOrder) {
+      return {
+        lockKey,
+        resultKey,
+        cachedOrder,
+      };
+    }
+
+    const inProgress = await getCache(lockKey);
+    if (inProgress?.processing) {
+      logAuditEvent("checkout.idempotency.in_progress", {
+        userId: String(userId),
+        idempotencyKey,
+      });
+      throw new BadRequestError(
+        "An order request with this idempotency key is being processed",
+        undefined,
+        CHECKOUT_ERROR_CODES.IDEMPOTENCY_IN_PROGRESS,
+      );
+    }
+
+    await setCache(
+      lockKey,
+      {
+        processing: true,
+      },
+      IDEMPOTENCY_LOCK_TTL_SECONDS,
+    );
+
+    return {
+      lockKey,
+      resultKey,
+      cachedOrder: null,
+    };
+  }
+
+  static async restoreReservedInventory(reservedItems = []) {
+    for (let i = 0; i < reservedItems.length; i++) {
+      const { productId, quantity } = reservedItems[i];
+
+      await inventory.findOneAndUpdate(
+        {
+          inven_productId: productId,
+        },
+        {
+          $inc: {
+            inven_stock: quantity,
+          },
+        },
+      );
+    }
+  }
+
   /**
    * 1. Checkout Review
    * Tính toán tổng tiền, discount, shipping fee
@@ -43,7 +158,13 @@ class CheckoutService {
 
     // Check cart exists
     const foundCart = await findCartById(cartId);
-    if (!foundCart) throw new BadRequestError("Cart does not exist");
+    if (!foundCart) {
+      throw new BadRequestError(
+        "Cart does not exist",
+        undefined,
+        CHECKOUT_ERROR_CODES.CART_NOT_FOUND,
+      );
+    }
 
     const checkout_order = {
       totalPrice: 0, // Tổng tiền hàng
@@ -65,7 +186,11 @@ class CheckoutService {
       // 1. Check product available
       const checkProductServer = await checkProductByServer(item_products);
       if (!checkProductServer[0]) {
-        throw new BadRequestError("Order wrong!");
+        throw new BadRequestError(
+          "Order wrong!",
+          undefined,
+          CHECKOUT_ERROR_CODES.ORDER_INVALID_ITEMS,
+        );
       }
 
       // 2. Tính tổng tiền của shop này
@@ -120,56 +245,122 @@ class CheckoutService {
     userId,
     user_address = {},
     user_payment = {},
+    idempotencyKey,
   }) {
-    const { shop_order_ids_new, checkout_order } =
-      await CheckoutService.checkoutReview({
-        cartId,
+    const normalizedIdempotencyKey =
+      CheckoutService.normalizeIdempotencyKey(idempotencyKey);
+
+    let idempotencyContext = null;
+    if (normalizedIdempotencyKey) {
+      idempotencyContext = await CheckoutService.handleIdempotencyResult({
         userId,
-        shop_order_ids,
+        idempotencyKey: normalizedIdempotencyKey,
       });
 
-    // Check lại inventory
-    const products = shop_order_ids_new.flatMap((order) => order.item_products);
-    const acquireProduct = [];
-
-    for (let i = 0; i < products.length; i++) {
-      const { productId, quantity } = products[i];
-
-      // Reserve inventory
-      const reserveResult = await this.reserveInventory({
-        productId,
-        quantity,
-        cartId,
-      });
-
-      acquireProduct.push(reserveResult);
-
-      if (!reserveResult) {
-        throw new BadRequestError(
-          `Product ${productId} is out of stock or insufficient quantity`,
-        );
+      if (idempotencyContext.cachedOrder) {
+        return idempotencyContext.cachedOrder;
       }
     }
 
-    // Create order
-    const newOrder = await order.create({
-      order_userId: userId,
-      order_checkout: checkout_order,
-      order_shipping: user_address,
-      order_payment: user_payment,
-      order_products: shop_order_ids_new,
-    });
+    const reservedItems = [];
 
-    // If order created successfully
-    if (newOrder) {
-      // Remove products from cart
-      await cart.findByIdAndUpdate(cartId, {
-        cart_products: [],
-        cart_count_products: 0,
+    try {
+      const { shop_order_ids_new, checkout_order } =
+        await CheckoutService.checkoutReview({
+          cartId,
+          userId,
+          shop_order_ids,
+        });
+
+      // Check lại inventory
+      const products = shop_order_ids_new.flatMap(
+        (order) => order.item_products,
+      );
+
+      for (let i = 0; i < products.length; i++) {
+        const { productId, quantity } = products[i];
+
+        // Reserve inventory
+        const reserveResult = await this.reserveInventory({
+          productId,
+          quantity,
+          cartId,
+        });
+
+        if (!reserveResult) {
+          logAuditEvent("inventory.update.failed", {
+            userId: String(userId),
+            productId: String(productId),
+            quantity,
+            reason: "insufficient_stock",
+          });
+
+          throw new BadRequestError(
+            `Product ${productId} is out of stock or insufficient quantity`,
+            undefined,
+            CHECKOUT_ERROR_CODES.INVENTORY_INSUFFICIENT,
+          );
+        }
+
+        reservedItems.push({
+          productId,
+          quantity,
+        });
+      }
+
+      // Create order
+      const newOrder = await order.create({
+        order_userId: userId,
+        order_checkout: checkout_order,
+        order_shipping: user_address,
+        order_payment: user_payment,
+        order_products: shop_order_ids_new,
       });
-    }
 
-    return newOrder;
+      // If order created successfully
+      if (newOrder) {
+        // Remove products from cart
+        await cart.findByIdAndUpdate(cartId, {
+          cart_products: [],
+          cart_count_products: 0,
+        });
+
+        if (idempotencyContext) {
+          await setCache(
+            idempotencyContext.resultKey,
+            newOrder.toObject(),
+            IDEMPOTENCY_RESULT_TTL_SECONDS,
+          );
+        }
+
+        logAuditEvent("order.created", {
+          orderId: String(newOrder._id),
+          userId: String(userId),
+          totalCheckout: checkout_order.totalCheckout,
+          paymentMethod: user_payment?.method || "COD",
+        });
+      }
+
+      return newOrder;
+    } catch (error) {
+      if (reservedItems.length > 0) {
+        // Roll back only items that were actually reserved successfully.
+        await CheckoutService.restoreReservedInventory(reservedItems);
+
+        logAuditEvent("checkout.inventory.rollback", {
+          userId: String(userId),
+          cartId: String(cartId),
+          reservedItems,
+          reason: error?.message || "unknown_error",
+        });
+      }
+
+      throw error;
+    } finally {
+      if (idempotencyContext) {
+        await deleteCache(idempotencyContext.lockKey);
+      }
+    }
   }
 
   /**
@@ -226,7 +417,11 @@ class CheckoutService {
       .lean();
 
     if (!foundOrder) {
-      throw new NotFoundError("Order not found");
+      throw new NotFoundError(
+        "Order not found",
+        undefined,
+        CHECKOUT_ERROR_CODES.ORDER_NOT_FOUND,
+      );
     }
 
     return foundOrder;
@@ -247,7 +442,11 @@ class CheckoutService {
 
     // Only can cancel if order is pending
     if (foundOrder.order_status !== "pending") {
-      throw new BadRequestError("Cannot cancel order at this status");
+      throw new BadRequestError(
+        "Cannot cancel order at this status",
+        undefined,
+        CHECKOUT_ERROR_CODES.ORDER_CANCEL_INVALID_STATUS,
+      );
     }
 
     // Restore inventory
@@ -280,7 +479,7 @@ class CheckoutService {
   /**
    * Update order status by shop
    */
-  static async updateOrderStatusByShop({ orderId, status }) {
+  static async updateOrderStatusByShop({ orderId, shopId, status }) {
     const validStatuses = [
       "pending",
       "confirmed",
@@ -290,22 +489,76 @@ class CheckoutService {
     ];
 
     if (!validStatuses.includes(status)) {
-      throw new BadRequestError("Invalid order status");
+      throw new BadRequestError(
+        "Invalid order status",
+        undefined,
+        CHECKOUT_ERROR_CODES.STATUS_INVALID,
+      );
     }
 
-    const updatedOrder = await order.findByIdAndUpdate(
-      orderId,
-      {
-        order_status: status,
-      },
-      { new: true },
+    const foundOrder = await order.findById(orderId);
+    if (!foundOrder) {
+      throw new NotFoundError(
+        "Order not found",
+        undefined,
+        CHECKOUT_ERROR_CODES.ORDER_NOT_FOUND,
+      );
+    }
+
+    const ownsAnyOrderItem = (foundOrder.order_products || []).some(
+      (shopOrder) => String(shopOrder?.shopId) === String(shopId),
     );
 
-    if (!updatedOrder) {
-      throw new NotFoundError("Order not found");
+    if (!ownsAnyOrderItem) {
+      logAuditEvent("checkout.shop.update_status.denied", {
+        orderId: String(orderId),
+        shopId: String(shopId),
+        requestedStatus: status,
+        reason: "shop_not_owner",
+      });
+      throw new ForbiddenRequestError(
+        "You do not have permission to update this order",
+        undefined,
+        CHECKOUT_ERROR_CODES.SHOP_ORDER_FORBIDDEN,
+      );
     }
 
-    return updatedOrder;
+    if (status === "cancelled") {
+      logAuditEvent("checkout.shop.cancel.denied", {
+        orderId: String(orderId),
+        shopId: String(shopId),
+      });
+      throw new ForbiddenRequestError(
+        "Shop cannot cancel orders. Please use customer cancellation flow",
+        undefined,
+        CHECKOUT_ERROR_CODES.SHOP_CANCEL_FORBIDDEN,
+      );
+    }
+
+    const currentStatus = String(foundOrder.order_status || "");
+    if (currentStatus === status) {
+      return foundOrder;
+    }
+
+    const allowedNextStatuses = ORDER_TRANSITIONS[currentStatus] || [];
+    if (!allowedNextStatuses.includes(status)) {
+      logAuditEvent("checkout.status.transition.denied", {
+        orderId: String(orderId),
+        shopId: String(shopId),
+        fromStatus: currentStatus,
+        toStatus: status,
+      });
+      throw new BadRequestError(
+        `Invalid status transition from ${currentStatus} to ${status}`,
+        undefined,
+        CHECKOUT_ERROR_CODES.STATUS_TRANSITION_INVALID,
+      );
+    }
+
+    foundOrder.order_status = status;
+    await foundOrder.save();
+
+    return foundOrder;
   }
 }
 

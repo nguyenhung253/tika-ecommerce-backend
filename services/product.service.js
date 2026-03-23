@@ -9,7 +9,7 @@ Product (Base class - Chứa logic chung)
 **/
 
 "use strict";
-const { BadRequestError } = require("../helpers/error.response");
+const { BadRequestError, NotFoundError } = require("../helpers/error.response");
 const { invalidateProductCache } = require("../helpers/cache");
 const { clothing, product, electronic } = require("../models/product.model");
 const { insertInventory } = require("../models/repositories/inventory.repo");
@@ -137,13 +137,21 @@ class ProductFactory {
    * @param {object} payload - Data mới cần update
    */
   static async updateProduct(type, productId, payload) {
+    const productShop = payload.product_shop;
+
     switch (type) {
       case "Electronics":
         // Tạo instance Electronic với data mới, sau đó gọi updateProduct()
-        return new Electronic(payload).updateProduct({ productId });
+        return new Electronic(payload).updateProduct({
+          productId,
+          productShop,
+        });
       case "Clothing":
         // Tạo instance Clothing với data mới, sau đó gọi updateProduct()
-        return new Clothing(payload).updateProduct({ productId });
+        return new Clothing(payload).updateProduct({
+          productId,
+          productShop,
+        });
       default:
         throw new BadRequestError(`Invalid Product Types ${type}`);
     }
@@ -195,10 +203,23 @@ class Product {
    * @param {object} bodyUpdate - Data cần update (name, price, description...)
    * @returns {object} Document sau khi update (new: true)
    */
-  async updateProduct({ productId, bodyUpdate }) {
-    return await product.findByIdAndUpdate(productId, bodyUpdate, {
-      new: true,
-    });
+  async updateProduct({ productId, productShop, bodyUpdate }) {
+    const updatedProduct = await product.findOneAndUpdate(
+      {
+        _id: productId,
+        product_shop: productShop,
+      },
+      bodyUpdate,
+      {
+        new: true,
+      },
+    );
+
+    if (!updatedProduct) {
+      throw new NotFoundError("Product not found or access denied");
+    }
+
+    return updatedProduct;
   }
 }
 
@@ -221,22 +242,30 @@ class Clothing extends Product {
    *   1. Update bảng CLOTHING (brand, size, material...)
    *   2. Gọi super.updateProduct() để update bảng PRODUCT (name, price...)
    */
-  async updateProduct({ productId }) {
+  async updateProduct({ productId, productShop }) {
     // this = instance Clothing chứa data mới từ payload
     const objectParams = this;
 
     // Step 1: Nếu có product_attribute → Update bảng CLOTHING
     if (objectParams.product_attribute) {
-      await clothing.findByIdAndUpdate(
-        productId,
+      const updatedClothing = await clothing.findOneAndUpdate(
+        {
+          _id: productId,
+          product_shop: productShop,
+        },
         objectParams.product_attribute,
         { new: true },
       );
+
+      if (!updatedClothing) {
+        throw new NotFoundError("Product not found or access denied");
+      }
     }
 
     // Step 2: Gọi parent class (Product) để update bảng PRODUCT
     const updateProduct = await super.updateProduct({
       productId,
+      productShop,
       bodyUpdate: objectParams, // { product_name, product_price... }
     });
     return updateProduct;
@@ -258,18 +287,27 @@ class Electronic extends Product {
     return newProduct;
   }
 
-  async updateProduct({ productId }) {
+  async updateProduct({ productId, productShop }) {
     const objectParams = this;
 
     if (objectParams.product_attribute) {
-      await electronic.findByIdAndUpdate(
-        productId,
+      const updatedElectronic = await electronic.findOneAndUpdate(
+        {
+          _id: productId,
+          product_shop: productShop,
+        },
         objectParams.product_attribute,
+        { new: true },
       );
+
+      if (!updatedElectronic) {
+        throw new NotFoundError("Product not found or access denied");
+      }
     }
 
     const updateProduct = await super.updateProduct({
       productId,
+      productShop,
       bodyUpdate: objectParams,
     });
     return updateProduct;

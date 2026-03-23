@@ -1,4 +1,24 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce_api
+    ports:
+      - "4953:4953"
+    env_file:
+      - .env
+    environment:
+      PORT: 4953
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      MONGODB_URL: ${MONGODB_URL:-mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/ecommerce?authSource=admin}
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - ecommerce_network
+    restart: unless-stopped
+
   mongodb:
     image: mongo:6.0
     container_name: ecommerce_mongodb

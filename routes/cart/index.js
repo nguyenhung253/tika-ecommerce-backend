@@ -3,11 +3,12 @@
 const express = require("express");
 const CartController = require("../../controllers/cart.controller");
 const asyncHandler = require("../../helpers/asyncHandler");
-const { authentication } = require("../../auth/authentication");
+const { authentication, requireRole } = require("../../auth/authentication");
 const router = express.Router();
 
 // All cart routes require authentication
 router.use(authentication);
+router.use(requireRole("customer", "admin"));
 
 // Add to cart
 router.post("", asyncHandler(CartController.addToCart));

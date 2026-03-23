@@ -9,20 +9,33 @@ const router = express.Router();
 // All checkout routes require authentication
 router.use(authentication);
 
-// User routes
-router.post("/review", asyncHandler(CheckoutController.checkoutReview));
+router.post(
+  "/review",
+  requireRole("customer", "admin"),
+  asyncHandler(CheckoutController.checkoutReview),
+);
 
-router.post("/order", asyncHandler(CheckoutController.orderByUser));
+router.post(
+  "/order",
+  requireRole("customer", "admin"),
+  asyncHandler(CheckoutController.orderByUser),
+);
 
-router.get("/orders", asyncHandler(CheckoutController.getOrdersByUser));
+router.get(
+  "/orders",
+  requireRole("customer", "admin"),
+  asyncHandler(CheckoutController.getOrdersByUser),
+);
 
 router.get(
   "/orders/:orderId",
+  requireRole("customer", "admin"),
   asyncHandler(CheckoutController.getOneOrderByUser),
 );
 
 router.post(
   "/orders/:orderId/cancel",
+  requireRole("customer", "admin"),
   asyncHandler(CheckoutController.cancelOrderByUser),
 );
 

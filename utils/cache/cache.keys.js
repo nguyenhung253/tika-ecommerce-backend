@@ -23,6 +23,10 @@ const CacheKeys = {
   order: {
     detail: (id) => `order:detail:${id}`,
     user: (userId) => `order:user:${userId}`,
+    idempotencyResult: (userId, idemKey) =>
+      `order:idempotency:result:${userId}:${idemKey}`,
+    idempotencyLock: (userId, idemKey) =>
+      `order:idempotency:lock:${userId}:${idemKey}`,
   },
 
   user: {
@@ -36,8 +40,16 @@ const CacheKeys = {
   auth: {
     blacklist: (jti) => `auth:blacklist:${jti}`,
     refreshToken: (userId) => `auth:refresh:${userId}`,
+    loginFailCounter: (accountType, email) =>
+      `auth:login:fail-counter:${accountType}:${email}`,
+    loginFailBlock: (accountType, email) =>
+      `auth:login:fail-block:${accountType}:${email}`,
     forgotPasswordOtp: (accountType, email) =>
       `auth:forgot-password:otp:${accountType}:${email}`,
+    forgotPasswordVerified: (accountType, email) =>
+      `auth:forgot-password:verified:${accountType}:${email}`,
+    forgotPasswordOtpVerifyBlock: (accountType, email) =>
+      `auth:forgot-password:otp-verify-block:${accountType}:${email}`,
   },
 
   discount: {

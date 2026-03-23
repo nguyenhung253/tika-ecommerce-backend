@@ -102,6 +102,44 @@ class AccessController {
       },
     }).send(res);
   });
+
+  static verifyForgotPasswordOtp = asyncHandler(async (req, res, next) => {
+    const { email, accountType, otp } = req.body;
+    if (!email) throw new BadRequestError("Email is required");
+    if (!accountType) throw new BadRequestError("Account Type is required");
+    if (!otp) throw new BadRequestError("OTP is required");
+
+    const result = await AccessService.verifyForgotPasswordOtp({
+      email,
+      accountType,
+      otp,
+    });
+
+    return new SuccessResponse({
+      message: result.message,
+      data: {
+        verifiedTtl: 600,
+      },
+    }).send(res);
+  });
+
+  static resetForgotPassword = asyncHandler(async (req, res, next) => {
+    const { email, accountType, newPassword } = req.body;
+    if (!email) throw new BadRequestError("Email is required");
+    if (!accountType) throw new BadRequestError("Account Type is required");
+    if (!newPassword) throw new BadRequestError("New password is required");
+
+    const result = await AccessService.resetPasswordWithOtp({
+      email,
+      accountType,
+      newPassword,
+    });
+
+    return new SuccessResponse({
+      message: result.message,
+      data: {},
+    }).send(res);
+  });
 }
 
 module.exports = AccessController;
