@@ -89,6 +89,19 @@ class AccessController {
       data: result,
     }).send(res);
   });
+
+  static forgotPassword = asyncHandler(async (req, res, next) => {
+    const { email, accountType } = req.body;
+    if (!email) throw new BadRequestError("Email is required");
+    if (!accountType) throw new BadRequestError("Account Type is required");
+    const result = await AccessService.forgotPassword({ email, accountType });
+    return new SuccessResponse({
+      message: result.message,
+      data: {
+        ttl: 300,
+      },
+    }).send(res);
+  });
 }
 
 module.exports = AccessController;

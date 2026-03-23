@@ -12,7 +12,11 @@ const {
 } = require("../utils/authToken");
 const TokenService = require("./token.service");
 const { parseTokenExpiry } = require("../utils/tokenExpiry");
-
+const otpGenerator = require("otp-generator");
+const crypto = require("crypto");
+const { setCache } = require("../utils/cache/cache.service");
+const CacheKeys = require("../utils/cache/cache.keys");
+const { sendOTP } = require("../configs/init.mailer");
 const USER_ROLES = ["customer", "admin"];
 const ACCOUNT_TYPES = ["user", "shop"];
 
@@ -271,6 +275,57 @@ class AccessService {
       },
     };
   };
+
+  static async forgotPassword({ email, accountType = "" }) {
+    if (!email) {
+      throw new BadRequestError("Email is required");
+    }
+
+    if (!ACCOUNT_TYPES.includes(accountType)) {
+      throw new BadRequestError("Invalid account type");
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const account =
+      accountType === "shop"
+        ? await Shop.findOne({ email: normalizedEmail }).lean()
+        : await User.findOne({ email: normalizedEmail }).lean();
+
+    // Always return a generic success message to avoid email enumeration.
+    if (!account) {
+      return {
+        message: " OTP has been sent",
+      };
+    }
+
+    const otp = otpGenerator.generate(6, {
+      digits: true,
+      upperCaseAlphabets: false,
+      lowerCaseAlphabets: false,
+      specialChars: false,
+    });
+
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+    const otpKey = CacheKeys.auth.forgotPasswordOtp(
+      accountType,
+      normalizedEmail,
+    );
+
+    await setCache(
+      otpKey,
+      {
+        otpHash,
+        attempts: 0,
+      },
+      300,
+    );
+
+    await sendOTP(normalizedEmail, otp);
+
+    return {
+      message: "OTP has been sent",
+    };
+  }
 }
 
 module.exports = AccessService;

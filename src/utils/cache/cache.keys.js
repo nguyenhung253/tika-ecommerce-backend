@@ -36,6 +36,8 @@ const CacheKeys = {
   auth: {
     blacklist: (jti) => `auth:blacklist:${jti}`,
     refreshToken: (userId) => `auth:refresh:${userId}`,
+    forgotPasswordOtp: (accountType, email) =>
+      `auth:forgot-password:otp:${accountType}:${email}`,
   },
 
   discount: {

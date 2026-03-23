@@ -1,6 +1,6 @@
 "use strict";
 
-const { getRedis } = require("../dbs/init.redis");
+const { getRedis } = require("../../configs/init.redis");
 
 const DEFAULT_TTL = 300;
 

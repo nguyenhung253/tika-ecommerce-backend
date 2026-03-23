@@ -1,6 +1,6 @@
 "use strict";
 
-const { Comment } = require("../models");
+const { Comment } = require("../comment.model");
 
 const getCommentsByProductId = async (productId) => {
   const comments = await Comment.find({ comment_productId: productId });

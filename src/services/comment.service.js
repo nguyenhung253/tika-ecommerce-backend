@@ -58,10 +58,4 @@ class CommentService {
   }
 }
 
-module.exports = {
-  createComment,
-  getCommentsByProductId,
-  getAllComments,
-  deleteComment,
-  updateComment,
-};
+module.exports = CommentService;

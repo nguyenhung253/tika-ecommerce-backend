@@ -24,4 +24,6 @@ router.post(
   AccessController.refreshToken,
 );
 
+router.post("/forgot-password/request-otp", AccessController.forgotPassword);
+
 module.exports = router;

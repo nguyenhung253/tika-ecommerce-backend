@@ -46,7 +46,7 @@ SOLID_AND_DESIGN_PATTERNS.md
 DEPLOYMENT_GUIDE.md
 CACHE_STRATEGY.md
 OAUTH2_SERVICE_GUIDE.md
-
+ecosystem.config.js
 # Test files
 request.http
 
