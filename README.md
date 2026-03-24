@@ -27,18 +27,18 @@ Backend API for an ecommerce platform built with Node.js, Express, MongoDB, Redi
 
 ## Tech Stack
 
-| Layer | Technology |
-| --- | --- |
-| Runtime | Node.js 20 |
-| Framework | Express 5 |
-| Database | MongoDB + Mongoose |
-| Cache / Queue | Redis + BullMQ |
-| Authentication | JWT + Google OAuth2 |
-| Payments | VNPay |
-| Email | Nodemailer |
-| Testing | Jest |
-| API Docs | Swagger UI |
-| Deployment | Docker, Docker Compose, GitHub Actions |
+| Layer          | Technology                             |
+| -------------- | -------------------------------------- |
+| Runtime        | Node.js 20                             |
+| Framework      | Express 5                              |
+| Database       | MongoDB + Mongoose                     |
+| Cache / Queue  | Redis + BullMQ                         |
+| Authentication | JWT + Google OAuth2                    |
+| Payments       | VNPay                                  |
+| Email          | Nodemailer                             |
+| Testing        | Jest                                   |
+| API Docs       | Swagger UI                             |
+| Deployment     | Docker, Docker Compose, GitHub Actions |
 
 ## Architecture
 
@@ -343,6 +343,7 @@ Important variables:
 
 - `PORT`
 - `NODE_ENV`
+- `CORS_ORIGINS`
 - `MONGODB_URL`
 - `REDIS_URL`
 

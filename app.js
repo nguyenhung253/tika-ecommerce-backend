@@ -7,25 +7,39 @@ const compression = require("compression");
 const swaggerUi = require("swagger-ui-express");
 const openapiSpec = require("./docs/swagger/openapi");
 
-// CORS configuration
-// app.use(
-//   cors({
-//     origin: [
-//       "http://localhost:5173",
-//       "http://localhost:3000",
-//       "https://tikashop.qzz.io",
-//     ],
-//     credentials: true,
-//     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-//     allowedHeaders: [
-//       "Content-Type",
-//       "Authorization",
-//       "x-api-key",
-//       "x-client-id",
-//       "x-rtoken-id",
-//     ],
-//   }),
-// );
+const allowedOrigins = (
+  process.env.CORS_ORIGINS ||
+  "http://localhost:5173,http://localhost:3000,https://tikashop.qzz.io"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests without origin (health checks, curl, server-to-server).
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-api-key",
+    "x-client-id",
+    "x-refresh-token",
+    "x-rtoken-id",
+  ],
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 // Logging mọi request gửi đến server
 app.use(morgan("dev"));
