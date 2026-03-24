@@ -2,8 +2,6 @@
 
 Backend API for an ecommerce platform built with Node.js, Express, MongoDB, Redis, BullMQ, Google OAuth2, and VNPay.
 
-This project was built as a backend portfolio project and focuses on business flows that are more realistic than a basic CRUD demo:
-
 - JWT auth with refresh token rotation
 - API key + permission middleware
 - OTP-based forgot-password flow
