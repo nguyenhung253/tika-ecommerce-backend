@@ -137,7 +137,8 @@ jobs:
             echo "Updating source code..."
             git fetch origin main
             git checkout main
-            git pull origin main
+            git reset --hard origin/main
+            git clean -fd
 
             echo "Logging in to Docker Hub..."
             echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
