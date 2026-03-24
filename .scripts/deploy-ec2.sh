@@ -29,6 +29,14 @@ $COMPOSE_CMD config > "$BACKUP_FILE" || true
 echo "Pulling latest application image..."
 $COMPOSE_CMD pull app
 
+echo "Cleaning up stale containers with fixed names (if any)..."
+for container_name in ecommerce_api ecommerce_mongodb ecommerce_redis; do
+  if docker ps -a --format '{{.Names}}' | grep -qx "$container_name"; then
+    echo "Removing existing container: $container_name"
+    docker rm -f "$container_name" >/dev/null 2>&1 || true
+  fi
+done
+
 echo "Ensuring MongoDB and Redis are running..."
 $COMPOSE_CMD up -d mongodb redis
 
