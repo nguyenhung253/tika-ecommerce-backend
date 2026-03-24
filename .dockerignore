@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+logs
+.git
+.github
+.env
+.env.production
+.env.deploy
+coverage
+docker-compose*.yml
+README.md
+PROJECT_CONTEXT.md
+request.http
+tests
+.kiro

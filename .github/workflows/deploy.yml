@@ -1,28 +1,35 @@
-name: Build & Deploy to EC2 (Docker)
+name: CI/CD Deploy to EC2
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
 
 env:
+  NODE_VERSION: "20"
   REGISTRY: docker.io
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/ecommerce-backend
-  PORT: 4953
+  APP_PORT: 4953
 
 jobs:
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
-    name: Run Tests
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -31,177 +38,142 @@ jobs:
         run: npm test
 
   build:
-    needs: test
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    name: Build Docker Image
-    permissions:
-      contents: read
-      packages: write
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - uses: actions/checkout@v4
+      image_ref: ${{ steps.image_ref.outputs.image_ref }}
 
-      - name: Set up Docker Buildx
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Registry
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Compute image reference
+        id: image_ref
+        shell: bash
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+          echo "Using image ref: ${IMAGE_REF}"
 
-      - name: Build and push Docker image
-        id: build
+      - name: Build and push commit image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: |
+            ${{ steps.image_ref.outputs.image_ref }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
   deploy:
-    needs: build
+    name: Deploy to AWS EC2
     runs-on: ubuntu-latest
-    name: Deploy to EC2
+    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare .env file
-        run: |
-          echo "PORT=${{ env.PORT }}" >> .env.deploy
-          echo "NODE_ENV=production" >> .env.deploy
-          echo "MONGODB_URL=${{ secrets.MONGODB_URL }}" >> .env.deploy
-          echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env.deploy
-          echo "ACCESS_TOKEN_SECRET=${{ secrets.JWT_SECRET }}" >> .env.deploy
-          echo "REFRESH_TOKEN_SECRET=${{ secrets.JWT_REFRESH_SECRET }}" >> .env.deploy
-          echo "MONGO_USER=${{ secrets.MONGO_USER }}" >> .env.deploy
-          echo "MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}" >> .env.deploy
-          echo "OTP_EXPIRY=${{ secrets.OTP_EXPIRY }}" >> .env.deploy
-          echo "OTP_DIGIT=${{ secrets.OTP_DIGIT }}" >> .env.deploy
-          echo "EMAIL_USER=${{ secrets.MAIL_NAME }}" >> .env.deploy
-          echo "EMAIL_PASS=${{ secrets.MAIL_PASSWORD }}" >> .env.deploy
-
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
+      - name: Deploy application on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          APP_IMAGE: ${{ needs.build.outputs.image_ref }}
+          APP_PORT: ${{ env.APP_PORT }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          MONGODB_URL: ${{ secrets.MONGODB_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REDIRECT_URI: ${{ secrets.GOOGLE_OAUTH_REDIRECT_URI }}
+          VNPAY_PAYMENT_URL: ${{ secrets.VNPAY_PAYMENT_URL }}
+          VNPAY_TERMINAL_CODE: ${{ secrets.VNPAY_TERMINAL_CODE }}
+          VNPAY_HASH_SECRET: ${{ secrets.VNPAY_HASH_SECRET }}
+          VNPAY_RETURN_URL: ${{ secrets.VNPAY_RETURN_URL }}
+          VNPAY_IPN_URL: ${{ secrets.VNPAY_IPN_URL }}
+          GLOBAL_API_RATE_LIMIT_MAX_REQUESTS: ${{ secrets.GLOBAL_API_RATE_LIMIT_MAX_REQUESTS }}
+          GLOBAL_API_RATE_LIMIT_WINDOW_SECONDS: ${{ secrets.GLOBAL_API_RATE_LIMIT_WINDOW_SECONDS }}
+          LOGIN_FAIL_MAX_ATTEMPTS: ${{ secrets.LOGIN_FAIL_MAX_ATTEMPTS }}
+          LOGIN_FAIL_WINDOW_SECONDS: ${{ secrets.LOGIN_FAIL_WINDOW_SECONDS }}
+          LOGIN_FAIL_BLOCK_SECONDS: ${{ secrets.LOGIN_FAIL_BLOCK_SECONDS }}
+          OTP_TTL_SECONDS: ${{ secrets.OTP_TTL_SECONDS }}
+          OTP_MAX_ATTEMPTS: ${{ secrets.OTP_MAX_ATTEMPTS }}
+          OTP_VERIFY_BLOCK_SECONDS: ${{ secrets.OTP_VERIFY_BLOCK_SECONDS }}
+          VERIFIED_TTL_SECONDS: ${{ secrets.VERIFIED_TTL_SECONDS }}
+          NOTIFICATION_WORKER_ENABLED: "true"
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT }}
+          envs: APP_IMAGE,APP_PORT,DOCKER_USERNAME,DOCKER_PASSWORD,MONGODB_URL,REDIS_URL,MONGO_USER,MONGO_PASSWORD,ACCESS_TOKEN_SECRET,REFRESH_TOKEN_SECRET,EMAIL_USER,EMAIL_PASS,GOOGLE_OAUTH_CLIENT_ID,GOOGLE_OAUTH_CLIENT_SECRET,GOOGLE_OAUTH_REDIRECT_URI,VNPAY_PAYMENT_URL,VNPAY_TERMINAL_CODE,VNPAY_HASH_SECRET,VNPAY_RETURN_URL,VNPAY_IPN_URL,GLOBAL_API_RATE_LIMIT_MAX_REQUESTS,GLOBAL_API_RATE_LIMIT_WINDOW_SECONDS,LOGIN_FAIL_MAX_ATTEMPTS,LOGIN_FAIL_WINDOW_SECONDS,LOGIN_FAIL_BLOCK_SECONDS,OTP_TTL_SECONDS,OTP_MAX_ATTEMPTS,OTP_VERIFY_BLOCK_SECONDS,VERIFIED_TTL_SECONDS,NOTIFICATION_WORKER_ENABLED
+          script_stop: true
           script: |
-            set -e
+            set -euo pipefail
 
-            # Define deployment directory
-            DEPLOY_DIR="/home/${{ secrets.EC2_USER }}/ecommerce-backend"
+            DEPLOY_DIRECTORY="/home/${{ secrets.EC2_USER }}/ecommerce-backend"
 
-            echo "=== Deployment started at $(date) ==="
+            echo "Deploying into ${DEPLOY_DIRECTORY}"
+            cd "${DEPLOY_DIRECTORY}"
 
-            # Navigate to deployment directory
-            cd $DEPLOY_DIR || { echo "Directory not found"; exit 1; }
-
-            # Pull latest code
-            echo ">>> Pulling latest code from main branch..."
+            echo "Updating source code..."
             git fetch origin main
             git checkout main
             git pull origin main
 
-            # Backup current docker-compose state (for rollback)
-            echo ">>> Creating backup for rollback capability..."
-            docker-compose config > /tmp/docker-compose.backup.yml || true
+            echo "Logging in to Docker Hub..."
+            echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
 
-            # Create .env file with production secrets
-            echo ">>> Setting up environment variables..."
-            cat > .env << EOF
-            PORT=${{ env.PORT }}
+            echo "Writing production environment file..."
+            cat > .env <<EOF
             NODE_ENV=production
-            MONGODB_URL=${{ secrets.MONGODB_URL }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            ACCESS_TOKEN_SECRET=${{ secrets.JWT_SECRET }}
-            REFRESH_TOKEN_SECRET=${{ secrets.JWT_REFRESH_SECRET }}
-            MONGO_USER=${{ secrets.MONGO_USER }}
-            MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}
-            OTP_EXPIRY=${{ secrets.OTP_EXPIRY }}
-            OTP_DIGIT=${{ secrets.OTP_DIGIT }}
-            EMAIL_USER=${{ secrets.MAIL_NAME }}
-            EMAIL_PASS=${{ secrets.MAIL_PASSWORD }}
+            PORT=${APP_PORT}
+            APP_IMAGE=${APP_IMAGE}
+            MONGODB_URL=${MONGODB_URL}
+            REDIS_URL=${REDIS_URL}
+            MONGO_USER=${MONGO_USER}
+            MONGO_PASSWORD=${MONGO_PASSWORD}
+            ACCESS_TOKEN_SECRET=${ACCESS_TOKEN_SECRET}
+            REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET}
+            EMAIL_USER=${EMAIL_USER}
+            EMAIL_PASS=${EMAIL_PASS}
+            GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+            GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+            GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI}
+            VNPAY_PAYMENT_URL=${VNPAY_PAYMENT_URL}
+            VNPAY_TERMINAL_CODE=${VNPAY_TERMINAL_CODE}
+            VNPAY_HASH_SECRET=${VNPAY_HASH_SECRET}
+            VNPAY_RETURN_URL=${VNPAY_RETURN_URL}
+            VNPAY_IPN_URL=${VNPAY_IPN_URL}
+            GLOBAL_API_RATE_LIMIT_MAX_REQUESTS=${GLOBAL_API_RATE_LIMIT_MAX_REQUESTS}
+            GLOBAL_API_RATE_LIMIT_WINDOW_SECONDS=${GLOBAL_API_RATE_LIMIT_WINDOW_SECONDS}
+            LOGIN_FAIL_MAX_ATTEMPTS=${LOGIN_FAIL_MAX_ATTEMPTS}
+            LOGIN_FAIL_WINDOW_SECONDS=${LOGIN_FAIL_WINDOW_SECONDS}
+            LOGIN_FAIL_BLOCK_SECONDS=${LOGIN_FAIL_BLOCK_SECONDS}
+            OTP_TTL_SECONDS=${OTP_TTL_SECONDS}
+            OTP_MAX_ATTEMPTS=${OTP_MAX_ATTEMPTS}
+            OTP_VERIFY_BLOCK_SECONDS=${OTP_VERIFY_BLOCK_SECONDS}
+            VERIFIED_TTL_SECONDS=${VERIFIED_TTL_SECONDS}
+            NOTIFICATION_WORKER_ENABLED=${NOTIFICATION_WORKER_ENABLED}
             EOF
 
-            # Pull latest Docker image
-            echo ">>> Pulling latest Docker image..."
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-            # Stop and remove old containers
-            echo ">>> Stopping old containers..."
-            docker-compose down || true
-
-            # Start new containers with latest image
-            echo ">>> Starting new containers..."
-            IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" docker-compose up -d
-
-            # Wait for app container to be healthy
-            echo ">>> Waiting for application to be ready..."
-            for i in {1..30}; do
-              if docker-compose exec -T app sh -c "curl -f http://localhost:${{ env.PORT }}/ > /dev/null 2>&1"; then
-                echo "✓ Application is healthy"
-                break
-              fi
-              if [ $i -eq 30 ]; then
-                echo "✗ Application failed to start"
-                docker-compose logs app
-                exit 1
-              fi
-              echo "  Waiting... ($i/30)"
-              sleep 2
-            done
-
-            # Check MongoDB connectivity
-            echo ">>> Verifying MongoDB connectivity..."
-            docker-compose exec -T app npm test -- --testNamePattern="mongodb" || echo "MongoDB test skipped"
-
-            # Cleanup
-            echo ">>> Cleaning up old Docker images..."
-            docker image prune -f --filter "dangling=true"
-
-            echo "=== Deployment completed successfully at $(date) ==="
-
-      - name: Notify Deployment Success
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number || context.ref.split('/').pop(),
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '✅ Deployment to EC2 successful! Image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest`'
-            })
-
-      - name: Notify Deployment Failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number || context.ref.split('/').pop(),
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '❌ Deployment to EC2 failed! Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-            })
+            chmod +x .scripts/deploy-ec2.sh
+            ./.scripts/deploy-ec2.sh

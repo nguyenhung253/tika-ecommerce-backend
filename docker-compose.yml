@@ -1,5 +1,6 @@
 services:
   app:
+    image: ${APP_IMAGE:-ecommerce-backend:latest}
     build:
       context: .
       dockerfile: Dockerfile
