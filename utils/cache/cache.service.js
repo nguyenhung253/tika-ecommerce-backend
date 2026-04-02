@@ -32,7 +32,7 @@ const deleteByPattern = async (pattern) => {
   }
 
   if (keys.length) {
-    await client.del(keys);
+    await client.del(...keys);
   }
 };
 
